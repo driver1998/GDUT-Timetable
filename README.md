@@ -1,7 +1,7 @@
 # GDUT-Timetable
 广东工业大学大学城校区课程表导出工具
 
-它可以从教务系统获取课程表，然后保存为 ICS (iCalendar) 文件，便于导入到其它日程表程序/服务，如 Outook、Google Calendar 等。
+它可以从教务系统获取课程表，然后保存为 ICS (iCalendar) 文件，便于导入到其它日程表程序/服务，如 Outlook、Google Calendar 等。
 
 
 ## 编译
