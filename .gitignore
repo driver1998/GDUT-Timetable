@@ -1,0 +1,7 @@
+.vscode
+Core/bin
+Core/obj
+Program/bin
+Program/obj
+Program/captcha.png
+Program/timetable.ics
