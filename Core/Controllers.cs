@@ -27,6 +27,7 @@ namespace TimeTable.Core
             webRequest.UserAgent = UserAgent;
             webRequest.CookieContainer = cookies;
             webRequest.Referer = URL;
+            webRequest.ContentType = "application/x-www-form-urlencoded; charset=UTF-8";
             return webRequest;
         }
 
@@ -74,7 +75,6 @@ namespace TimeTable.Core
         public async Task LoginAsync(string username, string password, string captcha)
         {
             var webRequest = GetWebRequest($"/new/login", "POST");
-            webRequest.ContentType = "application/x-www-form-urlencoded; charset=UTF-8";
             JWResponse msg;
 
             using (var reqStream = await webRequest.GetRequestStreamAsync())
@@ -98,7 +98,7 @@ namespace TimeTable.Core
         // 取课程表
         // time: 四位数年份 + 01上学期/02下学期
         // eg: 2017学年下学期 201702
-        public async Task<JWLectureList> GetTimeTableAsync(int time)
+        public async Task<JWList<JWLecture>> GetTimeTableAsync(int time, DateTime weekOneMonday)
         {
             var webRequest = GetWebRequest($"/xsgrkbcx!xsAllKbList.action?xnxqdm={time}", "GET");
             string html;
@@ -113,9 +113,31 @@ namespace TimeTable.Core
             if (!regex.IsMatch(html)) return null;
 
             var json = regex.Match(html).Groups[1].Value;
-            var lectures = JWLectureList.FromJson(json);
+            var lectures = JWJsonParser.FromLectureJson(json, weekOneMonday);
             
             return lectures;
+        }
+
+        public async Task<JWList<JWExam>> GetExamTimeTableAsync(int time) 
+        {
+            var webRequest = GetWebRequest("/xsksap!getDataList.action", "POST");
+            string json;
+
+            using (var requestStream = await webRequest.GetRequestStreamAsync()) 
+            {
+                var writer = new StreamWriter(requestStream);
+                await writer.WriteAsync($"xnxqdm={time}");
+                writer.Close();
+            }
+
+            using (var response = await webRequest.GetResponseAsync())
+            {
+                var reader = new StreamReader(response.GetResponseStream());
+                json = await reader.ReadToEndAsync();
+            }
+
+            var exams = JWJsonParser.FromExamJson(json);
+            return exams;
         }
 
         // 取第一周星期一的日期，便于计算时间

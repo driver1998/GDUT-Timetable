@@ -61,18 +61,31 @@ namespace Program
                 Console.Write("学  期: ");
                 var time =int.Parse(Console.ReadLine());
 
-                var lectures = await session.GetTimeTableAsync(time);
-                if (lectures == null)
+                var weekOneMonday = await session.GetWeekOneMondayAsync(time);
+                var lectures = await session.GetTimeTableAsync(time, weekOneMonday);
+                if (lectures == null || lectures.Count == 0)
                 {
                     Console.WriteLine("暂无该学期课表.");
-                    return;
+                } 
+                else
+                {    
+                    var lectureICS = lectures.ToICS();
+                    await File.WriteAllTextAsync("timetable.ics", lectureICS, Encoding.UTF8);
+                    Console.WriteLine("课程表已经导出到 timetable.ics");
                 }
-                    
-                var weekOneMon = await session.GetWeekOneMondayAsync(time);
-                var ics = lectures.ToICS(weekOneMon);
-                await File.WriteAllTextAsync("timetable.ics", ics, Encoding.UTF8);
-
-                Console.WriteLine("课程表已经导出到 timetable.ics");
+                
+                var exams = await session.GetExamTimeTableAsync(time);
+                if (exams == null || exams.Count == 0)
+                {
+                    Console.WriteLine("暂无该学期考试安排.");
+                }
+                else
+                {
+                    var examICS = exams.ToICS();
+                    await File.WriteAllTextAsync("exam.ics", examICS, Encoding.UTF8);
+                    Console.WriteLine("考试安排已经导出到 exams.ics");
+                }
+                
                 Console.Write("按任意键退出...");
                 Console.ReadKey(true);
             }).Wait();

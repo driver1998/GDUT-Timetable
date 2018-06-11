@@ -1,5 +1,5 @@
 using System;
-
+using System.Text;
 namespace TimeTable.Core
 {
     public static class Utils
@@ -30,6 +30,27 @@ namespace TimeTable.Core
         {
             var utc = dt.ToUniversalTime();
             return string.Format("{0:yyyyMMdd}T{1:HHmmss}Z", utc, utc);
+        }
+
+        // 创建 ICS 日程
+        public static string NewICSEvent(string eventName, string location, string additionalInfo, DateTime start, DateTime end)
+        {
+            var timeStamp = Utils.DateTimeToICSTimeStamp(DateTime.Now);
+            var startStamp = Utils.DateTimeToICSTimeStamp(start);
+            var endStamp = Utils.DateTimeToICSTimeStamp(end);
+
+            var sb = new StringBuilder();
+            sb.AppendLine(  "BEGIN:VEVENT");
+            sb.AppendLine($"UID:GDUT-{Guid.NewGuid()}");
+            sb.AppendLine($"SUMMARY:{eventName}");
+            sb.AppendLine($"DTSTART:{startStamp}");
+            sb.AppendLine($"DTEND:{endStamp}");
+            sb.AppendLine($"DTSTAMP:{timeStamp}");
+            sb.AppendLine($"STATUS:CONFIRMED");
+            sb.AppendLine($"LOCATION:{location} {additionalInfo}");
+            sb.AppendLine( "END:VEVENT");
+            
+            return sb.ToString();
         }
     }
 }
