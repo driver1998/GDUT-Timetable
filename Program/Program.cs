@@ -7,48 +7,46 @@ namespace Program
 {
     class Program
     {
+        private static string ReadPassword() {
+            StringBuilder passwordBuffer = new StringBuilder();
+            while (true)
+            {
+                ConsoleKeyInfo key = Console.ReadKey(true);
+                if (key.Key == ConsoleKey.Enter) break;
+                else if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (passwordBuffer.Length > 0) {
+                        Console.Write('\b');
+                        Console.Write(' ');
+                        Console.Write('\b');
+                        passwordBuffer.Remove(passwordBuffer.Length-1, 1);
+                    }
+                }
+                else if (!char.IsControl(key.KeyChar))
+                {   
+                    Console.Write('*');
+                    passwordBuffer.Append(key.KeyChar);
+                }
+            }
+            return passwordBuffer.ToString();
+        }
 
         static void Main(string[] args)
         {
 
             Task.Run(async () => {
-                var session = await Session.Connect();
-                
+                Session session = null;
 
                 Console.Write("学  号: ");
                 var username = Console.ReadLine();
 
                 Console.Write("密  码: ");
-                StringBuilder passwordBuffer = new StringBuilder();
-                while (true)
-                {
-                    ConsoleKeyInfo key = Console.ReadKey(true);
-                    if (key.Key == ConsoleKey.Enter) break;
-                    else if (key.Key == ConsoleKey.Backspace)
-                    {
-                        if (passwordBuffer.Length > 0) {
-                            Console.Write('\b');
-                            Console.Write(' ');
-                            Console.Write('\b');
-                            passwordBuffer.Remove(passwordBuffer.Length-1, 1);
-                        }
-                    }
-                    else if (!char.IsControl(key.KeyChar))
-                    {   
-                        Console.Write('*');
-                        passwordBuffer.Append(key.KeyChar);
-                    }
-                }
-
-                await File.WriteAllBytesAsync("captcha.png", await session.GetCaptchaAsync());
+                var password = Program.ReadPassword();
 
                 Console.WriteLine();
-                Console.Write("验证码: ");
-                var captcha = Console.ReadLine();
-
                 try
                 {
-                    await session.LoginAsync(username, passwordBuffer.ToString(), captcha);
+                    session = await Session.LoginAsync(username, password);
                 }
                 catch (LoginException ex)
                 {
@@ -59,31 +57,27 @@ namespace Program
                 Console.WriteLine("学期号为 四位学年 + 两位学期序号");
                 Console.WriteLine("如 2017 学年第二学期 201702");
                 Console.Write("学  期: ");
-                var time =int.Parse(Console.ReadLine());
-
-                var weekOneMonday = await session.GetWeekOneMondayAsync(time);
-                var lectures = await session.GetTimeTableAsync(time, weekOneMonday);
-                if (lectures == null || lectures.Count == 0)
+                var time = Console.ReadLine();
+                
+                var lectures = await session.GetTimeTableAsync(time);
+                if (lectures?.Count != 0)
+                {
+                    await File.WriteAllTextAsync("timetable.ics", lectures.ToICS(), Encoding.UTF8);
+                    Console.WriteLine("课程表已经导出到 timetable.ics");
+                } 
+                else 
                 {
                     Console.WriteLine("暂无该学期课表.");
-                } 
-                else
-                {    
-                    var lectureICS = lectures.ToICS();
-                    await File.WriteAllTextAsync("timetable.ics", lectureICS, Encoding.UTF8);
-                    Console.WriteLine("课程表已经导出到 timetable.ics");
                 }
                 
                 var exams = await session.GetExamTimeTableAsync(time);
-                if (exams == null || exams.Count == 0)
+                if (exams?.Count != 0)
                 {
-                    Console.WriteLine("暂无该学期考试安排.");
-                }
-                else
-                {
-                    var examICS = exams.ToICS();
-                    await File.WriteAllTextAsync("exam.ics", examICS, Encoding.UTF8);
+                    await File.WriteAllTextAsync("exam.ics", exams.ToICS(), Encoding.UTF8);
                     Console.WriteLine("考试安排已经导出到 exams.ics");
+                }
+                else {
+                    Console.WriteLine("暂无该学期考试安排.");
                 }
                 
                 Console.Write("按任意键退出...");

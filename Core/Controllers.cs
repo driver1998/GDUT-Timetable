@@ -13,94 +13,95 @@ namespace TimeTable.Core
 
     public class Session
     {
-
-
         const string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/17.17115";
-        const string URL = "http://jxfw.gdut.edu.cn";
+        const string JWURL = "http://jxfw.gdut.edu.cn";
+        const string AuthURL = "http://authserver.gdut.edu.cn";
+        
+        private string lt;
+        private string dllt;
+        private string execution;
+        private string eventID;
+        private string rmShown;
+
         private CookieContainer cookies = new CookieContainer();
         private Session() {}
-        
-        HttpWebRequest GetWebRequest(string location, string method)
-        {
-            var webRequest = (HttpWebRequest)WebRequest.Create($"{URL}{location}");
+        HttpWebRequest GetWebRequest(string URL, string method) {
+            var webRequest = (HttpWebRequest)WebRequest.Create(URL);
             webRequest.Method = method;
             webRequest.UserAgent = UserAgent;
             webRequest.CookieContainer = cookies;
-            webRequest.Referer = URL;
+            webRequest.Referer = JWURL;
             webRequest.ContentType = "application/x-www-form-urlencoded; charset=UTF-8";
             return webRequest;
         }
 
-        public async static Task<Session> Connect() {
-        
+        // 连接统一认证服务
+        private async static Task<Session> GetSessionAsync() {
             var session = new Session();
-            var webRequest = session.GetWebRequest("/", "GET");
+            var targetURL =$"{JWURL}/new/ssoLogin".Replace("/", "%2F").Replace(":", "%3A");
+            var webRequest = session.GetWebRequest($"{AuthURL}/authserver/login?service={targetURL}", "GET");
 
-            (await webRequest.GetResponseAsync()).Close();
-            var jSessionID = session.cookies.GetCookies(new Uri(URL))["JSESSIONID"];
-
-            if (jSessionID == null)
-                return null;
-            else
-                return session;
-        }
-
-        // 获取验证码
-        public async Task<byte[]> GetCaptchaAsync()
-        {
-            var startTime = new DateTime(1970, 1, 1);
-            var timeStamp = (long)(DateTime.Now.ToUniversalTime() - startTime).TotalMilliseconds;
-
-            var webRequest = GetWebRequest($"/yzm?d={timeStamp}", "GET");
-            byte[] captcha;
-
+            string html;
             using (var response = await webRequest.GetResponseAsync())
             {
-                var stream = response.GetResponseStream();
-                
-                var buffer = new byte[1024]; int actual; 
-                using (var ms = new MemoryStream())
-                {
-                    while ((actual = await stream.ReadAsync(buffer, 0, 1024)) > 0) 
-                        await ms.WriteAsync(buffer, 0, actual);
-                    ms.Position = 0;
-                    captcha = ms.ToArray();
-                }
+                var reader = new StreamReader(response.GetResponseStream());
+                html = await reader.ReadToEndAsync(); 
             }
+
+            var regex = new Regex(@"input type=""hidden"" name=""(.*?)"" value=""(.*?)""");
+            var matches = regex.Matches(html);
+
+            if (matches.Count != 5 || session.cookies.Count == 0) 
+                throw new LoginException("统一认证服务异常, 请稍后重试.");
+
+            session.lt = matches[0].Groups[2].Value;
+            session.dllt = matches[1].Groups[2].Value;
+            session.execution = matches[2].Groups[2].Value;
+            session.eventID = matches[3].Groups[2].Value;
+            session.rmShown = matches[4].Groups[2].Value;
             
-            return captcha;
+            return session;
         }
 
         // 登录
-        public async Task LoginAsync(string username, string password, string captcha)
-        {
-            var webRequest = GetWebRequest($"/new/login", "POST");
-            JWResponse msg;
+        public static async Task<Session> LoginAsync(string username, string password) {
+            var session = await GetSessionAsync();
 
+            var authURI = new Uri(AuthURL);
+            var targetURL =$"{JWURL}/new/ssoLogin".Replace("/", "%2F").Replace(":", "%3A");
+
+            var webRequest = session.GetWebRequest(
+                $"{AuthURL}/authserver/login?service={targetURL}",
+                "POST"
+            );
             using (var reqStream = await webRequest.GetRequestStreamAsync())
             {
                 var writer = new StreamWriter(reqStream);
-                await writer.WriteAsync($"account={username}&pwd={password}&verifycode={captcha}");
+                await writer.WriteAsync(
+                    $"username={username}&password={password}&" +
+                    $"lt={session.lt}&dllt={session.dllt}&execution={session.execution}&" + 
+                    $"_eventId={session.eventID}&rmShown={session.rmShown}"
+                );
                 writer.Close();
             }
             
             using (var response = await webRequest.GetResponseAsync())
             {
-                var reader = new StreamReader(response.GetResponseStream());
-                var json = await reader.ReadToEndAsync();
-                msg = JsonConvert.DeserializeObject<JWResponse>(json);
+                if (response.ResponseUri.Host == authURI.Host)
+                    throw new LoginException("登录失败, 请检查用户名和密码.");
             }
 
-            if (msg.code != 0)
-                throw new LoginException(msg.message);
+            return session;
         }
 
         // 取课程表
         // time: 四位数年份 + 01上学期/02下学期
         // eg: 2017学年下学期 201702
-        public async Task<JWList<JWLecture>> GetTimeTableAsync(int time, DateTime weekOneMonday)
+        public async Task<JWList> GetTimeTableAsync(string time)
         {
-            var webRequest = GetWebRequest($"/xsgrkbcx!xsAllKbList.action?xnxqdm={time}", "GET");
+            var weekOneMonday = await GetWeekOneMondayAsync(time);
+
+            var webRequest = GetWebRequest($"{JWURL}/xsgrkbcx!xsAllKbList.action?xnxqdm={time}", "GET");
             string html;
 
             using (var response = await webRequest.GetResponseAsync())
@@ -118,9 +119,9 @@ namespace TimeTable.Core
             return lectures;
         }
 
-        public async Task<JWList<JWExam>> GetExamTimeTableAsync(int time) 
+        public async Task<JWList> GetExamTimeTableAsync(string time) 
         {
-            var webRequest = GetWebRequest("/xsksap!getDataList.action", "POST");
+            var webRequest = GetWebRequest($"{JWURL}/xsksap!getDataList.action", "POST");
             string json;
 
             using (var requestStream = await webRequest.GetRequestStreamAsync()) 
@@ -141,9 +142,9 @@ namespace TimeTable.Core
         }
 
         // 取第一周星期一的日期，便于计算时间
-        public async Task<DateTime> GetWeekOneMondayAsync(int time)
+        private async Task<DateTime> GetWeekOneMondayAsync(string time)
         {
-            var webRequest = GetWebRequest($"/xsbjkbcx!getKbRq.action?xnxqdm={time}&zc=1", "GET");
+            var webRequest = GetWebRequest($"{JWURL}/xsbjkbcx!getKbRq.action?xnxqdm={time}&zc=1", "GET");
             DateTime date = DateTime.MinValue;
             
             using (var response = await webRequest.GetResponseAsync())

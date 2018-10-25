@@ -10,101 +10,19 @@ using System.Globalization;
 namespace TimeTable.Core
 {
     
-    // 教务系统的登录返回 json
-    public class JWResponse
+    public class JWEvent
     {
-        public int code { get; set; }
-        public string data { get; set; }
-        public string message { get;set; }
-
-        public override string ToString()
-            => $"code:{code}, data:{data}, message:{message}";        
-    }
-
-    // 教务系统中的一个条目
-    // 对应一个 ICS 日程
-    public interface JWEvent
-    {
-        string ToICSEvent();
-    }
-
-    // 课程对象
-    public class JWLecture : JWEvent
-    {
-        // 名称
         public string Name { get; set; }
-
-        // 上课周
-        public int[] Weeks { get; set; }
-
-        // 地点
         public string Location { get; set; }
-
-        // 教师
         public string Teacher { get; set; }
-
-        // 星期几
-        public int Weekday { get; set; }
-
-        // 第几节
-        public int[] Sections { get; set; }
-        
-        // 第一周星期一，用于计算上课时间
-        DateTime weekOneMonday;
-        public DateTime WeekOneMonday
-        {
-            // 只要日期值
-            get => weekOneMonday;
-            set => weekOneMonday = value.Date;
-        }
-    
-        // 将课程转换为 ICS 日程
-        public string ToICSEvent()
-        {
-            var sb = new StringBuilder();
-
-            // 确定开始和结束时间，sections已经事先排序
-            var start = Utils.LectureStart[Sections.First()];
-            var end = Utils.LectureStart[Sections.Last()] + Utils.LectureDuration;
-
-            // 每周创建一个日程条目
-            foreach (int week in this.Weeks)
-            {
-                // 加周数和星期几
-                var day = WeekOneMonday.AddDays((week-1)*7 + (Weekday-1));
-
-                sb.Append(
-                    Utils.NewICSEvent(Name, Location, Teacher, day+start, day+end)
-                );
-            }
-
-            return sb.ToString();
-        }
-    }
-
-    public class JWExam : JWEvent
-    {
-        // 考试科目名
-        public string Name { get; set; }
-        
-        //考试地点
-        public string Location { get; set; }
-
-        // 监考老师
-        public string Teacher { get; set; }
-
-        // 开考时间
         public DateTime StartTime { get; set; }
-
-        // 考试结束时间
         public DateTime EndTime { get; set; }
-
         public string ToICSEvent()
-            => Utils.NewICSEvent($"{Name} 考试", Location, Teacher, StartTime, EndTime);
+            => Utils.NewICSEvent(Name, Location, Teacher, StartTime, EndTime);
     }
 
     // 时间表
-    public class JWList<T> : List<T> where T : JWEvent
+    public class JWList : List<JWEvent>
     {
         // 将整个表导出为 ICS
         public string ToICS()
@@ -129,36 +47,53 @@ namespace TimeTable.Core
     public static class JWJsonParser
     {        
         // 解析教务系统的课程表 json
-        public static JWList<JWLecture> FromLectureJson(string json, DateTime weekOneMonday)
+        public static JWList FromLectureJson(string json, DateTime weekOneMonday)
         {
             var jArray = JArray.Parse(json);
-            var lectures = new JWList<JWLecture>();
+            var lectures = new JWList();
 
             foreach (JObject o in jArray)
             {
-                var weekSplit = ((string)o["zcs"]).Split(new[] {','});
-                var sectSplit = ((string)o["jcdm2"]).Split(new[] {','});
+                // 课在星期几上
+                var weekday = (int)o["xq"];
 
-                lectures.Add(new JWLecture() {
-                    Name = (string)o["kcmc"],
-                    Location = (string)o["jxcdmcs"],
-                    Teacher = (string)o["teaxms"],
-                    Weekday = (int)o["xq"],
-                    WeekOneMonday = weekOneMonday,
-                    Weeks = weekSplit.Select(p => int.Parse(p)).ToArray(),
-                    Sections = sectSplit.Select(p => int.Parse(p)).OrderBy(p=>p).ToArray()
-                });
+                // 上课周列表，升序排列
+                var weekSplit = ((string)o["zcs"]).Split(new[] {','});
+                var weeks = weekSplit.Select(p => int.Parse(p)).ToArray();
+
+                // 第几节
+                var sectSplit = ((string)o["jcdm2"]).Split(new[] {','});
+                var sections = sectSplit.Select(p => int.Parse(p)).OrderBy(p=>p).ToArray();
+
+                // 确定开始和结束时间
+                var start = Utils.LectureStart[sections.First()];
+                var end = Utils.LectureStart[sections.Last()] + Utils.LectureDuration;
+
+                // 每周创建一个日程条目
+                foreach (int week in weeks)
+                {
+                    // 加周数和星期几
+                    var day = weekOneMonday.AddDays((week-1)*7 + (weekday-1));
+
+                    lectures.Add(new JWEvent() {
+                        Name = (string)o["kcmc"],
+                        Location = (string)o["jxcdmcs"],
+                        Teacher = (string)o["teaxms"],
+                        StartTime = day + start,
+                        EndTime = day + end
+                    });
+                }
             }
 
             return lectures;
         }
 
         // 解析教务系统的考试安排 json
-        public static JWList<JWExam> FromExamJson(string json)
+        public static JWList FromExamJson(string json)
         {
             var jObject = JObject.Parse(json);
             var jArray = (JArray)jObject["rows"];
-            var exams = new JWList<JWExam>();
+            var exams = new JWList();
 
             foreach (JObject o in jArray)
             {
@@ -172,8 +107,8 @@ namespace TimeTable.Core
 
                 var start = DateTime.Parse(split[0]);
                 var end = DateTime.Parse(split[1]);
-                exams.Add(new JWExam() {
-                    Name = (string)o["kcmc"],
+                exams.Add(new JWEvent() {
+                    Name = $"{(string)o["kcmc"]} 考试",
                     Location = (string)o["kscdmc"],
                     Teacher = (string)o["jkteaxms"],
                     StartTime = examDate + new TimeSpan(start.Hour, start.Minute, 0),
